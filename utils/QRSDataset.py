@@ -119,7 +119,10 @@ class ECGDatasetFinetune(Dataset):
 
 
     def stratified_sampling(self, data, labels, in_chan_matrix, in_time_matrix):
-        y = np.argmax(labels.numpy(), axis=1)
+        if labels.ndim == 1:
+            y = labels.numpy()
+        else:
+            y = np.argmax(labels.numpy(), axis=1)
         unique_classes = np.unique(y)
 
         # Initialize lists to collect the selected indices
@@ -156,10 +159,15 @@ class ECGDatasetFinetune(Dataset):
         return data, labels, in_chan_matrix, in_time_matrix
 
     def print_class_distribution(self):
-        label_counts = torch.sum(self.labels, dim=0)
         print(f"==================== stage {self.stage}'s class distribution ====================")
-        for class_index, count in enumerate(label_counts):
-            print(f"Class {class_index}: {int(count.item())} samples")
+        if self.labels.ndim == 1:
+            unique_labels, label_counts = torch.unique(self.labels, return_counts=True)
+            for class_index, count in zip(unique_labels, label_counts):
+                print(f"Class {int(class_index.item())}: {int(count.item())} samples")
+        else:
+            label_counts = torch.sum(self.labels, dim=0)
+            for class_index, count in enumerate(label_counts):
+                print(f"Class {class_index}: {int(count.item())} samples")
 
     def prepare_data(self):
         if self.stage == "train" and self.split_ratio < 1.0:

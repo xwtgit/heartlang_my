@@ -159,7 +159,7 @@ class QRSTokenizer(nn.Module):
         batch_in_chans = []
         batch_in_times = []
 
-        indexs = np.random.choice(range(bs), size=5, replace=False)
+        indexs = np.random.choice(range(bs), size=min(5, bs), replace=False)
 
         for batch in tqdm(range(bs), desc="Processing batches"):
             ecg_signal = x[batch]
@@ -228,6 +228,10 @@ def select_dataset(dataset_name):
     
     elif dataset_name == "PhysioNet2021":
         data_category = ["data"]
+        data_type = ["train", "val", "test"]
+
+    elif dataset_name == "DREAMER":
+        data_category = ["va4"]
         data_type = ["train", "val", "test"]
 
     else:

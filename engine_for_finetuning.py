@@ -12,7 +12,9 @@
 import copy
 import math
 import sys
+import os
 from typing import Iterable, Optional
+import numpy as np
 import torch
 from timm.utils import ModelEma
 import utils.utils as utils
@@ -101,6 +103,8 @@ def train_one_epoch(
 
         if is_binary:
             targets = targets.float()
+        else:
+            targets = targets.long().view(-1)
 
         if loss_scaler is None:
             samples = samples.half()
@@ -120,7 +124,7 @@ def train_one_epoch(
         if is_binary:
             output = torch.sigmoid(output) # Compute Sigmoid Results for AUC-ROC Calculation
         else:
-            output = torch.softmax(output)
+            output = torch.softmax(output, dim=-1)
 
         loss_value = loss.item()
 
@@ -251,6 +255,8 @@ def evaluate(
 
         if is_binary:
             target = target.float()
+        else:
+            target = target.long().view(-1)
 
         # compute output
         with torch.cuda.amp.autocast():
@@ -262,7 +268,7 @@ def evaluate(
         if is_binary:
             output = torch.sigmoid(output).cpu()
         else:
-            output = torch.softmax(output).cpu()
+            output = torch.softmax(output, dim=-1).cpu()
 
         target = target.cpu()
 
@@ -304,6 +310,14 @@ def evaluate(
 
         utils.save_tensor_to_csv(gather_all_outputs, output_file_path)
         utils.save_tensor_to_csv(gather_all_targets, target_file_path)
+        if not is_binary:
+            confusion_matrix_path = f"results/pred/{dataset_name}_confusion_matrix.csv"
+            confusion = utils.compute_confusion_matrix(
+                gather_all_outputs.cpu().numpy(),
+                gather_all_targets.cpu().numpy(),
+            )
+            os.makedirs(os.path.dirname(confusion_matrix_path), exist_ok=True)
+            np.savetxt(confusion_matrix_path, confusion, fmt="%d", delimiter=",")
 
     roc_auc = utils.compute_roc_auc(
         gather_all_outputs.cpu().numpy(),

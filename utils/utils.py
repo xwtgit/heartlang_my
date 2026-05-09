@@ -28,6 +28,8 @@ import pandas as pd
 from scipy.stats import pearsonr
 from sklearn.metrics import (
     accuracy_score,
+    balanced_accuracy_score,
+    confusion_matrix,
     precision_score,
     recall_score,
     f1_score,
@@ -887,22 +889,40 @@ def get_trainable_layers(model):
 def analyze_ecg_classification(y_pred, y_true, is_binary, threshold=0.5):
     if is_binary:
         y_pred = (y_pred > threshold).astype(int)
+    else:
+        if y_pred.ndim > 1:
+            y_pred = np.argmax(y_pred, axis=1)
+        y_true = np.asarray(y_true).reshape(-1)
     total_accuracy = accuracy_score(y_true, y_pred)
     precision = precision_score(y_true, y_pred, average="macro", zero_division=0)
     recall = recall_score(y_true, y_pred, average="macro", zero_division=0)
     f1 = f1_score(y_true, y_pred, average="macro", zero_division=0)
 
-    return {
+    results = {
         "accuracy": total_accuracy,
         "precision": precision,
         "recall": recall,
         "f1": f1,
     }
+    if not is_binary:
+        results["balanced_accuracy"] = balanced_accuracy_score(y_true, y_pred)
+    return results
 
 
 def compute_roc_auc(y_pred, y_true):
-    macro_auc = roc_auc_score(y_true, y_pred, average="macro")
-    return macro_auc
+    try:
+        if np.asarray(y_true).ndim == 1:
+            return roc_auc_score(y_true, y_pred, average="macro", multi_class="ovr")
+        return roc_auc_score(y_true, y_pred, average="macro")
+    except ValueError as err:
+        print(f"ROC AUC is not available for this split: {err}")
+        return float("nan")
+
+
+def compute_confusion_matrix(y_pred, y_true):
+    if y_pred.ndim > 1:
+        y_pred = np.argmax(y_pred, axis=1)
+    return confusion_matrix(np.asarray(y_true).reshape(-1), y_pred)
 
 
 def compute_roc_auc_per_label(y_pred, y_true):

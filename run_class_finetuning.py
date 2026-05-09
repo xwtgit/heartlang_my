@@ -52,6 +52,12 @@ def get_args():
         add_help=False,
     )
     parser.add_argument("--is_binary", action="store_true", default=True)
+    parser.add_argument(
+        "--task_type",
+        default="binary",
+        choices=["binary", "multiclass"],
+        help="binary uses BCE multi-label targets; multiclass uses CE integer targets.",
+    )
     parser.add_argument("--batch_size", default=64, type=int)
     parser.add_argument("--epochs", default=30, type=int)
     parser.add_argument("--update_freq", default=1, type=int)
@@ -320,6 +326,7 @@ def get_dataset(args):
 
 
 def main(args, ds_init):
+    args.is_binary = args.task_type == "binary"
     utils.init_distributed_mode(args)
 
     if ds_init is not None:
@@ -336,10 +343,11 @@ def main(args, ds_init):
     # metrics: list of strings, the metrics you want to use. We utilize PyHealth to implement it.
     dataset_train, dataset_val, dataset_test, metrics = get_dataset(args)
 
-    val_invalid_columns = utils.check_dataset_labels(dataset_val)
-    print("val dataset has invalid columns: ", val_invalid_columns)
-    test_invalid_columns = utils.check_dataset_labels(dataset_test)
-    print("test dataset has invalid columns: ", test_invalid_columns)
+    if args.is_binary:
+        val_invalid_columns = utils.check_dataset_labels(dataset_val)
+        print("val dataset has invalid columns: ", val_invalid_columns)
+        test_invalid_columns = utils.check_dataset_labels(dataset_test)
+        print("test dataset has invalid columns: ", test_invalid_columns)
 
     if args.disable_eval_during_finetuning:
         dataset_val = None
@@ -612,20 +620,22 @@ def main(args, ds_init):
             dataset_dir=args.dataset_dir,
         )
 
-        roc_auc = test_stats["roc_auc"]
+        selected_metric_name = "roc_auc" if args.is_binary else "balanced_accuracy"
+        selected_metric = test_stats[selected_metric_name]
         print(f"====== {args.log_dir} ======")
-        print(f"====== AUC: {roc_auc} ======")
+        print(f"====== {selected_metric_name}: {selected_metric} ======")
 
         if dist.get_rank() == 0:
             results_save_path = "results/"
             os.makedirs(results_save_path, exist_ok=True)
-            save_results_as_csv(roc_auc, results_save_path, "finetune", args)
+            save_results_as_csv(selected_metric, results_save_path, "finetune", args)
 
         exit(0)
 
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
-    max_auc = 0.0
+    best_metric = 0.0
+    selected_metric_name = "roc_auc" if args.is_binary else "balanced_accuracy"
     for epoch in range(args.start_epoch, args.epochs + 1):
         if args.distributed:
             data_loader_train.sampler.set_epoch(epoch - 1)
@@ -679,11 +689,11 @@ def main(args, ds_init):
                 dataset_dir=args.dataset_dir,
             )
             print(
-                f"AUC of the network on the {len(dataset_val)} val ECG: {val_stats['roc_auc']*100:.2f}%"
+                f"{selected_metric_name} of the network on the {len(dataset_val)} val ECG: {val_stats[selected_metric_name]*100:.2f}%"
             )
 
-            if max_auc < val_stats["roc_auc"]:
-                max_auc = val_stats["roc_auc"]
+            if best_metric < val_stats[selected_metric_name]:
+                best_metric = val_stats[selected_metric_name]
                 if args.output_dir and args.save_ckpt:
                     utils.save_model(
                         args=args,
@@ -695,7 +705,7 @@ def main(args, ds_init):
                         model_ema=model_ema,
                     )
 
-            print(f"Max auc val: {max_auc*100:.2f}%")
+            print(f"Best {selected_metric_name} val: {best_metric*100:.2f}%")
             if log_writer is not None:
                 for key, value in val_stats.items():
                     if key == "accuracy":
