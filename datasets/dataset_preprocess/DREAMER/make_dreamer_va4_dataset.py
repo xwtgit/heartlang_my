@@ -40,8 +40,18 @@ def get_args():
     )
     parser.add_argument("--original_fs", default=256, type=int)
     parser.add_argument("--target_fs", default=100, type=int)
-    parser.add_argument("--window_sec", default=60.0, type=float)
-    parser.add_argument("--step_sec", default=None, type=float)
+    parser.add_argument(
+        "--window_sec",
+        default=10.0,
+        type=float,
+        help="Window length in seconds. HeartLang temporal embeddings support 0-15 time blocks, so 10s at 100 Hz is the safe default.",
+    )
+    parser.add_argument(
+        "--step_sec",
+        default=10.0,
+        type=float,
+        help="Window stride in seconds. Defaults to non-overlapping 10s windows.",
+    )
     parser.add_argument("--seed", default=0, type=int)
     parser.add_argument("--train_subjects", default=16, type=int)
     parser.add_argument("--val_subjects", default=3, type=int)
@@ -49,6 +59,12 @@ def get_args():
     parser.add_argument("--used_channels", nargs="+", default=[0, 1], type=int)
     parser.add_argument("--max_len", default=256, type=int)
     parser.add_argument("--token_len", default=96, type=int)
+    parser.add_argument(
+        "--max_time_index",
+        default=15,
+        type=int,
+        help="Maximum non-padding temporal index allowed by HeartLang temporal embeddings.",
+    )
     parser.add_argument("--no_zscore", action="store_true")
     parser.add_argument("--plot_qrs", action="store_true")
     return parser.parse_args()
@@ -264,6 +280,7 @@ def tokenize_and_save(stages, args):
         qrs_data = np.load(output_dir / f"{stage}_data.npy", mmap_mode="r")
         in_chans = np.load(output_dir / f"{stage}_data_in_chans.npy", mmap_mode="r")
         in_times = np.load(output_dir / f"{stage}_data_in_times.npy", mmap_mode="r")
+        validate_token_indices(in_chans, in_times, stage, args)
         print(
             f"{stage}: QRS data {qrs_data.shape}, labels {labels.shape}, "
             f"in_chans {in_chans.shape}, in_times {in_times.shape}"
@@ -297,12 +314,34 @@ def save_split_metadata(split, args):
         "target_fs": args.target_fs,
         "window_sec": args.window_sec,
         "step_sec": args.step_sec if args.step_sec is not None else args.window_sec,
+        "max_time_index": args.max_time_index,
         "used_channels": args.used_channels,
         "zscore": not args.no_zscore,
         "seed": args.seed,
     }
     with open(output_dir / "split_metadata.json", "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2)
+
+
+def validate_token_indices(in_chans, in_times, stage, args):
+    max_chan = int(np.max(in_chans))
+    min_chan = int(np.min(in_chans))
+    max_time = int(np.max(in_times))
+    min_time = int(np.min(in_times))
+    if min_chan < 0:
+        raise ValueError(f"{stage}: in_chans contains negative indices.")
+    if min_time < 0:
+        raise ValueError(f"{stage}: in_times contains negative indices.")
+    if max_time > args.max_time_index:
+        raise ValueError(
+            f"{stage}: in_times max is {max_time}, but HeartLang temporal "
+            f"embedding only supports 0-{args.max_time_index}. Use a shorter "
+            "window, e.g. --window_sec 10 --step_sec 10."
+        )
+    print(
+        f"{stage}: token index ranges in_chans=[{min_chan}, {max_chan}], "
+        f"in_times=[{min_time}, {max_time}]"
+    )
 
 
 def main():
